@@ -50,13 +50,20 @@ void loop() {
 
 void initializeSIM800C() {
   Serial.println("Initializing SIM800C...");
-  sim800c.println("AT");
-  delay(1000);
-  if (sim800c.find("OK")) {
-    Serial.println("SIM800C is OK");
-  } else {
-    Serial.println("SIM800C is not responding");
-    return;
+
+  for (int i = 0; i < 5; i++) {
+    sim800c.println("AT");
+    delay(1000);
+    if (sim800c.find("OK")) {
+      Serial.println("SIM800C is OK");
+      break;
+    } else {
+      Serial.println("Attempt " + String(i + 1) + ": SIM800C is not responding");
+      if (i == 4) {
+        Serial.println("Failed to initialize SIM800C after 5 attempts.");
+        return;
+      }
+    }
   }
 
   sim800c.println("AT+CPIN?");
@@ -72,14 +79,22 @@ void initializeSIM800C() {
   delay(1000);
   String regStatus = sim800c.readString();
   Serial.println("Network registration status: " + regStatus);
-  
-  sim800c.println("AT+CGATT?");
-  delay(1000);
-  if (sim800c.find("OK")) {
-    Serial.println("Attached to GPRS service");
-  } else {
-    Serial.println("Failed to attach to GPRS service");
-    return;
+
+  checkSignalStrength();
+
+  for (int i = 0; i < 5; i++) {
+    sim800c.println("AT+CGATT?");
+    delay(1000);
+    if (sim800c.find("OK")) {
+      Serial.println("Attached to GPRS service");
+      break;
+    } else {
+      Serial.println("Attempt " + String(i + 1) + ": Failed to attach to GPRS service");
+      if (i == 4) {
+        Serial.println("Failed to attach to GPRS service after 5 attempts.");
+        return;
+      }
+    }
   }
 
   sim800c.println("AT+CIPSHUT");
@@ -88,7 +103,9 @@ void initializeSIM800C() {
   delay(1000);
   sim800c.println("AT+CIPMUX=0");
   delay(1000);
-  sim800c.println("AT+CSTT=\"PPWAP\"");
+
+  // Replace "your_apn" with the actual APN for your GSM provider
+  sim800c.println("AT+CSTT=\"hutch3g\"");
   delay(1000);
   if (sim800c.find("OK")) {
     Serial.println("APN set successfully");
@@ -97,17 +114,24 @@ void initializeSIM800C() {
     return;
   }
 
-  sim800c.println("AT+CIICR");
-  delay(3000); // Increase delay for CIICR
-  if (sim800c.find("OK")) {
-    Serial.println("GPRS brought up successfully");
-  } else {
-    Serial.println("Failed to bring up GPRS");
-    return;
+  for (int i = 0; i < 5; i++) {
+    sim800c.println("AT+CIICR");
+    delay(10000); // Increase delay for CIICR
+    if (sim800c.find("OK")) {
+      Serial.println("GPRS brought up successfully");
+      break;
+    } else {
+      Serial.println("Attempt " + String(i + 1) + ": Failed to bring up GPRS");
+      if (i == 4) {
+        Serial.println("Failed to bring up GPRS after 5 attempts.");
+        return;
+      }
+    }
   }
+  checkSignalStrength();
 
   sim800c.println("AT+CIFSR");
-  delay(1000);
+  delay(2000);
   if (sim800c.available()) {
     String ipAddress = sim800c.readString();
     Serial.println("IP address: " + ipAddress);
@@ -116,34 +140,49 @@ void initializeSIM800C() {
   }
 
   // Additional delay to ensure network is ready
-  delay(2000);
+  delay(5000);
+}
+
+void checkSignalStrength() {
+  sim800c.println("AT+CSQ");
+  delay(1000);
+  if (sim800c.available()) {
+    String signalStrength = sim800c.readString();
+    Serial.println("Signal Strength: " + signalStrength);
+  } else {
+    Serial.println("Failed to get signal strength");
+  }
 }
 
 void sendToServer(double lat, double lon) {
   String latStr = String(lat, 6);
   String lonStr = String(lon, 6);
+  String data = "GET /get?lat=" + latStr + "&lon=" + lonStr + " HTTP/1.1\r\nHost: 174.138.22.49\r\n\r\n";
+  
+  Serial.println("Connecting to the server...");
 
-  Serial.println("Connected to server");
-  sim800c.println("AT+CIPSTART=\"TCP\",\"112.134.244.46\",\"3000\""); // Replace with your local IP and port
-  delay(5000); // Increase delay for CIPSTART
+  sim800c.println("AT+CIPSTART=\"TCP\",\"174.138.22.49\",8080"); 
+  delay(15000); // Increase delay for CIPSTART to 15 seconds
   if (sim800c.find("CONNECT OK")) {
     Serial.println("Connected to server");
+
+    sim800c.println("AT+CIPSEND");
+    delay(2000);
+    if (sim800c.find(">")) {
+      Serial.print("Sending data: ");
+      Serial.println(data);
+      sim800c.print(data);
+      delay(2000);
+
+      Serial.println("Data sent");
+
+      sim800c.println("AT+CIPCLOSE");
+      delay(1000);
+      Serial.println("Connection closed");
+    } else {
+      Serial.println("Failed to initiate data send");
+    }
   } else {
-//    Serial.println("Failed to connect to server");
-    return;
+    Serial.println("Failed to connect to server");
   }
-
-  Serial.println("Sending data to server...");
-  sim800c.println("AT+CIPSEND");
-  delay(2000);
-  String data = "GET /update?lat=" + latStr + "&lon=" + lonStr + " HTTP/1.1\r\nHost: 112.134.244.46\r\n\r\n"; // Replace with your local IP
-  sim800c.println(data);
-  delay(2000);
-
-  Serial.println("Data sent");
-
-  // Close the connection
-  sim800c.println("AT+CIPCLOSE");
-  delay(1000);
-  Serial.println("Connection closed");
 }
